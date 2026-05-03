@@ -80,6 +80,35 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: colors.accent,
   },
+
+  // Scale disclaimer banner
+  scaleBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#fff8ee",
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: "#f0d49a",
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginBottom: 10,
+  },
+  scaleBannerIcon: {
+    fontSize: 9,
+    marginRight: 5,
+    marginTop: 1,
+    color: "#8a5c00",
+  },
+  scaleBannerText: {
+    fontSize: 9,
+    color: "#8a5c00",
+    lineHeight: 1.6,
+    flex: 1,
+  },
+  scaleBannerBold: {
+    fontFamily: "Helvetica-Bold",
+  },
+
   ingredientsGrid: { flexDirection: "row", flexWrap: "wrap" },
   ingredientItem: {
     width: "50%",
@@ -189,6 +218,18 @@ export function RecipePDF({ recipe }) {
           <>
             <View style={styles.divider} />
             <Text style={styles.sectionHeading}>Ingredients</Text>
+
+            {/* Scale disclaimer — only shown when recipe was scaled */}
+            {recipe.multiplierNote && (
+              <View style={styles.scaleBanner}>
+                <Text style={styles.scaleBannerIcon}>⚠</Text>
+                <Text style={styles.scaleBannerText}>
+                  <Text style={styles.scaleBannerBold}>Scaled recipe: </Text>
+                  {recipe.multiplierNote}. Ingredient quantities below reflect the adjusted scale — refer to the original recipe for the base amounts.
+                </Text>
+              </View>
+            )}
+
             <View style={styles.ingredientsGrid}>
               {recipe.ingredients.map((item, i) => (
                 <View key={i} style={styles.ingredientItem}>

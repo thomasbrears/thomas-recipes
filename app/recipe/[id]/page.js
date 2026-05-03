@@ -8,7 +8,7 @@ import RecipeMultiplier, { scaleIngredient } from "../../components/RecipeMultip
 
 import {
   Carousel, Row, Col, Card, Tag, Button, Space,
-  Typography, Divider, Checkbox, List,
+  Typography, Divider, Checkbox, List, Switch,
 } from "antd";
 
 import {
@@ -18,14 +18,84 @@ import {
 
 const { Title, Paragraph } = Typography;
 
+// ─── Unit conversion helpers ──────────────────────────────────────────────────
+
+/**
+ * Metric → Imperial conversion map.
+ * Each entry: [metricUnit, imperialUnit, multiplier, decimalPlaces]
+ */
+const METRIC_TO_IMPERIAL = [
+  // Weight
+  { from: /\b(\d+(?:\.\d+)?)\s*kg\b/gi,  to: (n) => `${round(n * 2.20462, 2)} lb` },
+  { from: /\b(\d+(?:\.\d+)?)\s*g\b/gi,   to: (n) => `${round(n * 0.035274, 2)} oz` },
+  // Volume
+  { from: /\b(\d+(?:\.\d+)?)\s*ml\b/gi,  to: (n) => `${round(n * 0.202884, 2)} tsp` },
+  { from: /\b(\d+(?:\.\d+)?)\s*litre?s?\b/gi, to: (n) => `${round(n * 4.22675, 2)} cups` },
+  { from: /\b(\d+(?:\.\d+)?)\s*L\b/g,    to: (n) => `${round(n * 4.22675, 2)} cups` },
+  // Temperature
+  { from: /\b(\d+(?:\.\d+)?)\s*°?C\b/g,  to: (n) => `${round(n * 9/5 + 32, 0)}°F` },
+  // Length / depth
+  { from: /\b(\d+(?:\.\d+)?)\s*cm\b/gi,  to: (n) => `${round(n * 0.393701, 1)}"` },
+  { from: /\b(\d+(?:\.\d+)?)\s*mm\b/gi,  to: (n) => `${round(n * 0.0393701, 2)}"` },
+];
+
+const IMPERIAL_TO_METRIC = [
+  { from: /\b(\d+(?:\.\d+)?)\s*lb[s]?\b/gi,  to: (n) => `${round(n * 0.453592, 2)} kg` },
+  { from: /\b(\d+(?:\.\d+)?)\s*oz\b/gi,       to: (n) => `${round(n * 28.3495, 1)} g` },
+  { from: /\b(\d+(?:\.\d+)?)\s*cups?\b/gi,    to: (n) => `${round(n * 236.588, 0)} ml` },
+  { from: /\b(\d+(?:\.\d+)?)\s*tbsp\b/gi,     to: (n) => `${round(n * 14.7868, 1)} ml` },
+  { from: /\b(\d+(?:\.\d+)?)\s*tsp\b/gi,      to: (n) => `${round(n * 4.92892, 1)} ml` },
+  { from: /\b(\d+(?:\.\d+)?)\s*°?F\b/g,       to: (n) => `${round((n - 32) * 5/9, 0)}°C` },
+  { from: /\b(\d+(?:\.\d+)?)\s*"\b/g,         to: (n) => `${round(n * 2.54, 1)} cm` },
+];
+
+function round(num, dp) {
+  return parseFloat(num.toFixed(dp));
+}
+
+/**
+ * Convert all recognisable unit patterns in a string.
+ * mode: "metric" | "imperial"
+ */
+function convertUnits(str, mode) {
+  if (!str) return str;
+  const conversions = mode === "imperial" ? METRIC_TO_IMPERIAL : IMPERIAL_TO_METRIC;
+  let result = str;
+  for (const { from, to } of conversions) {
+    // Reset lastIndex for global regexes
+    from.lastIndex = 0;
+    result = result.replace(from, (_, num) => to(parseFloat(num)));
+  }
+  return result;
+}
+
+// ─── Servings formatter ───────────────────────────────────────────────────────
+
+/**
+ * Scale a servings string like "4", "4-6", "Serves 4", "Makes 12 cookies".
+ * Numbers are multiplied by relativeMult; non-numeric words are preserved.
+ */
+function scaleServings(servingsStr, relativeMult) {
+  if (!servingsStr || relativeMult === 1) return servingsStr;
+  return servingsStr.replace(/\d+(?:\.\d+)?/g, (match) => {
+    const scaled = parseFloat(match) * relativeMult;
+    // Keep integers as integers; trim floating point noise
+    return Number.isInteger(scaled) ? scaled : parseFloat(scaled.toPrecision(3));
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function RecipePage() {
   const { id } = useParams();
 
   const [recipe, setRecipe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
-  const [checkedItems, setCheckedItems] = useState([]);
+  const [checkedIngredients, setCheckedIngredients] = useState([]);
+  const [checkedSteps, setCheckedSteps] = useState([]);
   const [multiplier, setMultiplier] = useState(1);
+  const [unitMode, setUnitMode] = useState("metric"); // "metric" | "imperial"
 
   useEffect(() => {
     getRecipe(id)
@@ -34,10 +104,10 @@ export default function RecipePage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Reset checked items when multiplier changes so the list reflects new quantities
   const handleMultiplierChange = (mult) => {
     setMultiplier(mult);
-    setCheckedItems([]);
+    setCheckedIngredients([]);
+    // Don't reset step checks — user may already be mid-cook
   };
 
   const handleDownloadPDF = async (e) => {
@@ -101,15 +171,21 @@ export default function RecipePage() {
   if (!recipe) return null;
 
   const defaultMultiplier = recipe.defaultMultiplier ?? 1;
+  const relativeMult = multiplier / defaultMultiplier;
 
   const images = [recipe.coverImage, ...(recipe.images || [])]
     .filter(Boolean)
     .filter((img, i, arr) => arr.indexOf(img) === i);
 
   const ingredientCount = recipe.ingredients?.length || 0;
-  const desktopCols = ingredientCount > 7 ? 3 : 2;
 
-  const relativeMult = multiplier / defaultMultiplier;
+  const scaledServings = scaleServings(recipe.servings, relativeMult);
+
+  const toggleStep = (index) => {
+    setCheckedSteps((prev) =>
+      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
+    );
+  };
 
   return (
     <div style={{ width: "100%", padding: "24px 16px 120px", display: "flex", justifyContent: "center" }}>
@@ -130,11 +206,65 @@ export default function RecipePage() {
             grid-template-columns: repeat(3, 1fr);
           }
         }
-        /* Keep each ingredient on one line */
         .ingredients-grid .ant-checkbox-wrapper {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+
+        /* Step completion styles */
+        .step-item {
+          cursor: pointer;
+          border-radius: 8px;
+          padding: 4px 8px;
+          transition: background 0.2s, opacity 0.2s;
+        }
+        .step-item:hover {
+          background: #fdf6ee;
+        }
+        .step-item--done {
+          opacity: 0.45;
+        }
+        .step-item--done .step-body {
+          text-decoration: line-through;
+          color: #999 !important;
+        }
+        .step-number {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: #f0e0c8;
+          color: #b8621a;
+          font-weight: 700;
+          font-size: 13px;
+          margin-right: 10px;
+          flex-shrink: 0;
+          transition: background 0.2s, color 0.2s;
+        }
+        .step-item--done .step-number {
+          background: #e0e0e0;
+          color: #aaa;
+        }
+        .step-header {
+          display: flex;
+          align-items: center;
+          margin-bottom: 4px;
+        }
+
+        /* Unit toggle */
+        .unit-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: #fdf6ee;
+          border: 1px solid #f0e0c8;
+          border-radius: 20px;
+          padding: 4px 12px;
+          font-size: 13px;
+          color: #7a4f2a;
         }
       `}</style>
 
@@ -173,7 +303,6 @@ export default function RecipePage() {
             </div>
           </div>
         ) : (
-          // No image — show title as a plain heading
           <div style={{ marginTop: 24, marginBottom: 8 }}>
             <Title level={2} style={{ color: "#2a2420", marginBottom: recipe.subtitle ? 4 : 0 }}>
               {recipe.title}
@@ -186,6 +315,7 @@ export default function RecipePage() {
           </div>
         )}
 
+        {/* ── Stat cards — servings updates with multiplier ── */}
         <Row gutter={[8, 8]} style={{ marginTop: 16 }}>
           {recipe.prepTime && (
             <Col xs={12} md={6}>
@@ -207,10 +337,24 @@ export default function RecipePage() {
           )}
           {recipe.servings && (
             <Col xs={12} md={6}>
-              <Card size="small" style={{ textAlign: "center" }}>
+              <Card
+                size="small"
+                style={{
+                  textAlign: "center",
+                  // Highlight the card when servings have changed
+                  border: relativeMult !== 1 ? "1px solid #f0c87a" : undefined,
+                  background: relativeMult !== 1 ? "#fffbf0" : undefined,
+                  transition: "background 0.3s, border 0.3s",
+                }}
+              >
                 <TeamOutlined />
                 <div style={{ fontSize: 12, marginTop: 2 }}>Servings</div>
-                <b style={{ fontSize: 14 }}>{recipe.servings}</b>
+                <b style={{ fontSize: 14 }}>{scaledServings}</b>
+                {relativeMult !== 1 && (
+                  <div style={{ fontSize: 10, color: "#b8861a", marginTop: 1 }}>
+                    (was {recipe.servings})
+                  </div>
+                )}
               </Card>
             </Col>
           )}
@@ -240,11 +384,24 @@ export default function RecipePage() {
 
           {recipe.ingredients?.length > 0 && (
             <>
-             <div style={{ marginBottom: 16 }}>
+              {/* ── Controls row: multiplier + unit toggle ── */}
+              <div style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
                 <RecipeMultiplier
                   defaultMultiplier={defaultMultiplier}
                   onChange={handleMultiplierChange}
                 />
+
+                {/* Unit toggle */}
+                <label className="unit-toggle" style={{ cursor: "pointer" }}>
+                  <span style={{ fontWeight: unitMode === "metric" ? 700 : 400 }}>Metric</span>
+                  <Switch
+                    size="small"
+                    checked={unitMode === "imperial"}
+                    onChange={(checked) => setUnitMode(checked ? "imperial" : "metric")}
+                    style={{ background: unitMode === "imperial" ? "#b8621a" : undefined }}
+                  />
+                  <span style={{ fontWeight: unitMode === "imperial" ? 700 : 400 }}>Imperial</span>
+                </label>
               </div>
 
               <Title level={3}>
@@ -257,15 +414,16 @@ export default function RecipePage() {
               </Title>
 
               <Checkbox.Group
-                value={checkedItems}
-                onChange={setCheckedItems}
+                value={checkedIngredients}
+                onChange={setCheckedIngredients}
                 style={{ width: "100%" }}
                 aria-label="Ingredients checklist"
               >
-                {/* Responsive CSS grid — 1 col mobile, 2 col tablet, 2-3 col desktop */}
                 <div className={`ingredients-grid${ingredientCount > 7 ? " ingredients-grid--many" : ""}`}>
                   {recipe.ingredients.map((item, i) => {
-                    const label = scaleIngredient(item, relativeMult);
+                    // 1. Scale by multiplier, 2. convert units if imperial
+                    const scaled = scaleIngredient(item, relativeMult);
+                    const label = unitMode === "imperial" ? convertUnits(scaled, "imperial") : scaled;
                     return (
                       <Checkbox key={i} value={i}>
                         {label}
@@ -279,28 +437,71 @@ export default function RecipePage() {
 
           <Divider />
 
+          {/* ── Steps with completion tracking ── */}
           {recipe.steps?.length > 0 && (
             <>
-              <Title level={3}>Method</Title>
-              <List
-                dataSource={recipe.steps}
-                renderItem={(step, i) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={
-                        <div style={{ color: "#333", lineHeight: 2, fontSize: 18 }}>
-                          Step {i + 1}
-                        </div>
-                      }
-                      description={
-                        <div style={{ color: "#333", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.7, fontSize: 15 }}>
-                          {step}
-                        </div>
-                      }
-                    />
-                  </List.Item>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                <Title level={3} style={{ margin: 0 }}>Method</Title>
+                {checkedSteps.length > 0 && (
+                  <Button
+                    size="small"
+                    type="text"
+                    style={{ color: "#999", fontSize: 12 }}
+                    onClick={() => setCheckedSteps([])}
+                  >
+                    Reset steps
+                  </Button>
                 )}
-              />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {recipe.steps.map((step, i) => {
+                  const done = checkedSteps.includes(i);
+                  return (
+                    <div key={i}>
+                      {i > 0 && (
+                        <div style={{ borderTop: "1px solid #f0e8df", margin: "0 8px" }} />
+                      )}
+                      <div
+                        className={`step-item${done ? " step-item--done" : ""}`}
+                        onClick={() => toggleStep(i)}
+                        role="checkbox"
+                        aria-checked={done}
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === " " || e.key === "Enter" ? toggleStep(i) : null}
+                      >
+                        <div className="step-header">
+                          <span className="step-number">
+                            {done ? "✓" : i + 1}
+                          </span>
+                        </div>
+                        <div
+                          className="step-body"
+                          style={{
+                            color: "#333",
+                            whiteSpace: "normal",
+                            wordBreak: "break-word",
+                            lineHeight: 1.7,
+                            fontSize: 15,
+                            paddingLeft: 38,
+                          }}
+                        >
+                          {unitMode === "imperial" ? convertUnits(step, "imperial") : step}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Progress indicator */}
+              {recipe.steps.length > 1 && (
+                <div style={{ marginTop: 12, fontSize: 13, color: "#999" }}>
+                  {checkedSteps.length === recipe.steps.length
+                    ? "🎉 All steps complete!"
+                    : `${checkedSteps.length} of ${recipe.steps.length} steps done`}
+                </div>
+              )}
             </>
           )}
 
