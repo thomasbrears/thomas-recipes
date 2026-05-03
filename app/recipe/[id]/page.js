@@ -54,13 +54,16 @@ export default function RecipePage() {
         import("react"),
       ]);
 
-      // Scale ingredients for PDF when multiplier !== 1
+      const defaultMultiplier = recipe.defaultMultiplier ?? 1;
+
       const scaledRecipe = {
         ...recipe,
-        ingredients: multiplier !== 1
+        ingredients: multiplier !== defaultMultiplier
           ? recipe.ingredients?.map((ing) => {
-              const label = scaleIngredient(ing, multiplier);
-              return typeof ing === "string" ? label : { ...ing, qty: scaleQty(ing.qty, multiplier) };
+              const relativeMult = multiplier / defaultMultiplier;
+              return typeof ing === "string"
+                ? scaleIngredient(ing, relativeMult)
+                : { ...ing, qty: scaleQty(ing.qty, relativeMult) };
             })
           : recipe.ingredients,
         pageUrl: window.location.href,
@@ -68,8 +71,8 @@ export default function RecipePage() {
           dateStyle: "short",
           timeStyle: "short",
         }),
-        multiplierNote: multiplier !== (recipe.defaultMultiplier ?? 1)
-          ? `Scaled at ${multiplier}× (original: ${recipe.defaultMultiplier ?? 1}×)`
+        multiplierNote: multiplier !== defaultMultiplier
+          ? `Scaled at ${formatMult(multiplier)} (original: ${formatMult(defaultMultiplier)})`
           : null,
       };
 
@@ -79,7 +82,7 @@ export default function RecipePage() {
       link.setAttribute("href", url);
       link.setAttribute(
         "download",
-        `${(recipe.title ?? "recipe").replace(/[^a-z0-9]/gi, "_").toLowerCase()}${multiplier !== 1 ? `_${multiplier}x` : ""}.pdf`
+        `${(recipe.title ?? "recipe").replace(/[^a-z0-9]/gi, "_").toLowerCase()}${multiplier !== defaultMultiplier ? `_${multiplier}x` : ""}.pdf`
       );
       link.style.display = "none";
       document.body.appendChild(link);
@@ -103,14 +106,42 @@ export default function RecipePage() {
     .filter(Boolean)
     .filter((img, i, arr) => arr.indexOf(img) === i);
 
-  const isManyIngredients = (recipe.ingredients?.length || 0) > 7;
+  const ingredientCount = recipe.ingredients?.length || 0;
+  const desktopCols = ingredientCount > 7 ? 3 : 2;
+
+  const relativeMult = multiplier / defaultMultiplier;
 
   return (
     <div style={{ width: "100%", padding: "24px 16px 120px", display: "flex", justifyContent: "center" }}>
+      <style>{`
+        .ingredients-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 10px;
+          width: 100%;
+        }
+        @media (min-width: 600px) {
+          .ingredients-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (min-width: 900px) {
+          .ingredients-grid--many {
+            grid-template-columns: repeat(3, 1fr);
+          }
+        }
+        /* Keep each ingredient on one line */
+        .ingredients-grid .ant-checkbox-wrapper {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      `}</style>
+
       <div style={{ width: "100%", maxWidth: 1000 }}>
         <Link href="/">← Back to recipes</Link>
 
-        {images.length > 0 && (
+        {images.length > 0 ? (
           <div style={{ marginTop: 16, position: "relative" }}>
             <Carousel autoplay>
               {images.map((img, i) => (
@@ -129,15 +160,29 @@ export default function RecipePage() {
               background: "linear-gradient(to top, rgba(0,0,0,0.75), transparent)",
               display: "flex", alignItems: "flex-end", padding: 24,
             }}>
-              <Title style={{ color: "white", margin: 0 }} level={2}>
-                {recipe.title}
-              </Title>
-              {recipe.subtitle && (
-                <Paragraph type="secondary" style={{ color: "white", margin: "20px 20px 0" }}>
-                  {recipe.subtitle}
-                </Paragraph>
-              )}
+              <div>
+                <Title style={{ color: "white", margin: 0 }} level={2}>
+                  {recipe.title}
+                </Title>
+                {recipe.subtitle && (
+                  <Paragraph type="secondary" style={{ color: "white", margin: "8px 0 0" }}>
+                    {recipe.subtitle}
+                  </Paragraph>
+                )}
+              </div>
             </div>
+          </div>
+        ) : (
+          // No image — show title as a plain heading
+          <div style={{ marginTop: 24, marginBottom: 8 }}>
+            <Title level={2} style={{ color: "#2a2420", marginBottom: recipe.subtitle ? 4 : 0 }}>
+              {recipe.title}
+            </Title>
+            {recipe.subtitle && (
+              <Paragraph type="secondary" style={{ fontSize: 16, margin: 0 }}>
+                {recipe.subtitle}
+              </Paragraph>
+            )}
           </div>
         )}
 
@@ -195,8 +240,7 @@ export default function RecipePage() {
 
           {recipe.ingredients?.length > 0 && (
             <>
-              {/* ── Multiplier selector ── */}
-              <div style={{ marginBottom: 16 }}>
+             <div style={{ marginBottom: 16 }}>
                 <RecipeMultiplier
                   defaultMultiplier={defaultMultiplier}
                   onChange={handleMultiplierChange}
@@ -205,7 +249,7 @@ export default function RecipePage() {
 
               <Title level={3}>
                 Ingredients
-                {multiplier !== 1 && (
+                {multiplier !== defaultMultiplier && (
                   <span style={{ fontSize: 14, fontWeight: 400, color: "#d4863a", marginLeft: 10 }}>
                     ({formatMult(multiplier)})
                   </span>
@@ -218,15 +262,15 @@ export default function RecipePage() {
                 style={{ width: "100%" }}
                 aria-label="Ingredients checklist"
               >
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: isManyIngredients ? "1fr 1fr 1fr" : "1fr 1fr",
-                  gap: 10,
-                  width: "100%",
-                }}>
+                {/* Responsive CSS grid — 1 col mobile, 2 col tablet, 2-3 col desktop */}
+                <div className={`ingredients-grid${ingredientCount > 7 ? " ingredients-grid--many" : ""}`}>
                   {recipe.ingredients.map((item, i) => {
-                    const label = scaleIngredient(item, multiplier);
-                    return <Checkbox key={i} value={i}>{label}</Checkbox>;
+                    const label = scaleIngredient(item, relativeMult);
+                    return (
+                      <Checkbox key={i} value={i}>
+                        {label}
+                      </Checkbox>
+                    );
                   })}
                 </div>
               </Checkbox.Group>
