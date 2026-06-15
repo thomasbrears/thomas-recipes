@@ -5,19 +5,16 @@ import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 
 // ── Unit definitions with aliases for autocomplete ────────────────────────────
 const UNITS = [
-  // Volume
   { label: "teaspoon", value: "teaspoon", aliases: ["tsp", "t"] },
   { label: "tablespoon", value: "tablespoon", aliases: ["tbsp", "tbs", "tb", "T"] },
   { label: "cup", value: "cup", aliases: ["c", "cups"] },
   { label: "fluid oz", value: "fl oz", aliases: ["floz", "fl", "fluid oz"] },
   { label: "ml", value: "ml", aliases: ["millilitre", "milliliter", "mls"] },
   { label: "litre", value: "litre", aliases: ["liter", "l", "L"] },
-  // Weight
   { label: "gram", value: "g", aliases: ["gram", "grams", "gr"] },
   { label: "kg", value: "kg", aliases: ["kilogram", "kilograms"] },
   { label: "oz", value: "oz", aliases: ["ounce", "ounces"] },
   { label: "lb", value: "lb", aliases: ["pound", "pounds", "lbs"] },
-  // Misc
   { label: "pinch", value: "pinch", aliases: ["pn"] },
   { label: "dash", value: "dash", aliases: [] },
   { label: "handful", value: "handful", aliases: ["hndf"] },
@@ -51,12 +48,10 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
     setUnitOptions(getUnitOptions(val));
     update("unit", val);
   };
-
   const handleUnitSelect = (val) => {
     update("unit", val);
     nameRef?.current?.focus();
   };
-
   const handleKeyDown = (field) => (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -71,7 +66,6 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-      {/* Row number */}
       <div style={{
         minWidth: 24, height: 24, borderRadius: "50%",
         background: "#f5ede0", color: "#c07030",
@@ -82,7 +76,6 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         {index + 1}
       </div>
 
-      {/* Qty */}
       <Input
         ref={qtyRef}
         value={item.qty}
@@ -92,7 +85,6 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         style={{ ...inputStyle, width: 64 }}
       />
 
-      {/* Unit — autocomplete */}
       <AutoComplete
         value={item.unit}
         options={unitOptions}
@@ -110,17 +102,15 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         />
       </AutoComplete>
 
-      {/* Name */}
       <Input
         ref={nameRef}
         value={item.name}
         onChange={(e) => update("name", e.target.value)}
         onKeyDown={handleKeyDown("name")}
         placeholder="Ingredient name"
-        style={{ ...inputStyle, flex: 1 }}
+        style={{ ...inputStyle, flex: 1, minWidth: 140 }}
       />
 
-      {/* Notes */}
       <Input
         ref={notesRef}
         value={item.notes}
@@ -130,7 +120,6 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         style={{ ...inputStyle, width: 160 }}
       />
 
-      {/* Remove */}
       {showRemove && (
         <Button
           type="text"
@@ -143,14 +132,14 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
   );
 }
 
-// ── Column headers ─────────────────────────────────────────────────────────────
+// ── Column headers ────────────────────────────────────────────────────────────
 function ColumnHeaders() {
   const labelStyle = { fontSize: 11, fontWeight: 600, color: "#9c9086", textTransform: "uppercase", letterSpacing: "0.05em" };
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, paddingLeft: 30 }}>
       <div style={{ ...labelStyle, width: 64 }}>Qty</div>
       <div style={{ ...labelStyle, width: 130 }}>Unit</div>
-      <div style={{ ...labelStyle, flex: 1 }}>Ingredient</div>
+      <div style={{ ...labelStyle, flex: 1, minWidth: 140 }}>Ingredient</div>
       <div style={{ ...labelStyle, width: 160 }}>Notes</div>
       <div style={{ width: 32 }} />
     </div>
@@ -164,7 +153,6 @@ export function emptyIngredient() {
 
 // ── Main IngredientList ───────────────────────────────────────────────────────
 export default function IngredientList({ items, onChange }) {
-  // refs[i] = { qty, unit, name, notes }
   const refs = useRef([]);
 
   const ensureRefs = (i) => {
@@ -189,34 +177,64 @@ export default function IngredientList({ items, onChange }) {
   };
 
   const handleEnter = (i) => {
-    if (i < items.length - 1) {
-      refs.current[i + 1]?.qty?.focus();
-    } else {
-      addItem();
-    }
+    if (i < items.length - 1) refs.current[i + 1]?.qty?.focus();
+    else addItem();
   };
 
   return (
     <div>
-      <ColumnHeaders />
-      {items.map((item, i) => {
-        const r = ensureRefs(i);
-        return (
-          <IngredientRow
-            key={i}
-            item={item}
-            index={i}
-            onChange={(updated) => updateItem(i, updated)}
-            onRemove={() => removeItem(i)}
-            onEnter={() => handleEnter(i)}
-            showRemove={items.length > 1}
-            qtyRef={(el) => { ensureRefs(i).qty = el?.input || el; }}
-            unitRef={(el) => { ensureRefs(i).unit = el?.input || el; }}
-            nameRef={(el) => { ensureRefs(i).name = el?.input || el; }}
-            notesRef={(el) => { ensureRefs(i).notes = el?.input || el; }}
-          />
-        );
-      })}
+      {/* Horizontally scrollable wrapper */}
+      <div style={{ position: "relative" }}>
+        <div
+          style={{
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            // Thin scrollbar on mobile browsers that show one
+            scrollbarWidth: "thin",
+            scrollbarColor: "#e0d8ce transparent",
+            paddingBottom: 4,
+          }}
+        >
+          {/* Inner container with a fixed minimum width so rows never squash */}
+          <div style={{ minWidth: 580 }}>
+            <ColumnHeaders />
+            {items.map((item, i) => {
+              ensureRefs(i);
+              return (
+                <IngredientRow
+                  key={i}
+                  item={item}
+                  index={i}
+                  onChange={(updated) => updateItem(i, updated)}
+                  onRemove={() => removeItem(i)}
+                  onEnter={() => handleEnter(i)}
+                  showRemove={items.length > 1}
+                  qtyRef={(el) => { ensureRefs(i).qty = el?.input || el; }}
+                  unitRef={(el) => { ensureRefs(i).unit = el?.input || el; }}
+                  nameRef={(el) => { ensureRefs(i).name = el?.input || el; }}
+                  notesRef={(el) => { ensureRefs(i).notes = el?.input || el; }}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Fade hint on the right edge — only visible when there's overflow to scroll */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            bottom: 4,
+            width: 40,
+            background: "linear-gradient(to right, transparent, #faf8f4)",
+            pointerEvents: "none",
+            borderRadius: "0 8px 8px 0",
+          }}
+        />
+      </div>
+
       <Button
         type="dashed"
         icon={<PlusOutlined />}
