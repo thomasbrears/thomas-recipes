@@ -16,6 +16,9 @@ const colors = {
   border: "#e8e8e8",
   tagBg: "#f5f5f5",
   infoBg: "#fafafa",
+  sectionBg: "#fdf6ec",
+  sectionBorder: "#e8c88a",
+  sectionText: "#8a5020",
   white: "#ffffff",
 };
 
@@ -79,6 +82,28 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     borderBottomWidth: 2,
     borderBottomColor: colors.accent,
+  },
+
+  // Ingredient section header (Base, Filling, Topping etc.)
+  ingredientSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.sectionBg,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.sectionBorder,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginTop: 10,
+    marginBottom: 6,
+    width: "100%",
+  },
+  ingredientSectionText: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+    color: colors.sectionText,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
 
   // Scale disclaimer banner
@@ -169,6 +194,56 @@ function ingredientLabel(item) {
     .join(" ");
 }
 
+function isSection(item) {
+  return item && item.type === "section";
+}
+
+/**
+ * Render the ingredients list, grouping items under their section headers.
+ * Section headers break the two-column grid — they span full width and the
+ * next run of ingredients starts a fresh grid beneath them.
+ */
+function IngredientsList({ ingredients }) {
+  // Split the flat list into runs: each run is either a section header or a
+  // consecutive group of ingredient rows that share the same section.
+  const runs = [];
+  let currentRun = null;
+
+  for (const item of ingredients) {
+    if (isSection(item)) {
+      // Push whatever was accumulating, then start a new section
+      if (currentRun) runs.push(currentRun);
+      currentRun = { label: item.label, items: [] };
+    } else {
+      if (!currentRun) currentRun = { label: null, items: [] };
+      currentRun.items.push(item);
+    }
+  }
+  if (currentRun) runs.push(currentRun);
+
+  return (
+    <>
+      {runs.map((run, ri) => (
+        <View key={ri}>
+          {run.label ? (
+            <View style={styles.ingredientSection}>
+              <Text style={styles.ingredientSectionText}>{run.label}</Text>
+            </View>
+          ) : null}
+          <View style={styles.ingredientsGrid}>
+            {run.items.map((item, ii) => (
+              <View key={ii} style={styles.ingredientItem}>
+                <View style={styles.bullet} />
+                <Text style={styles.ingredientText}>{ingredientLabel(item)}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+    </>
+  );
+}
+
 export function RecipePDF({ recipe }) {
   const infoItems = [
     { label: "Prep", value: recipe.prepTime },
@@ -219,7 +294,6 @@ export function RecipePDF({ recipe }) {
             <View style={styles.divider} />
             <Text style={styles.sectionHeading}>Ingredients</Text>
 
-            {/* Scale disclaimer — only shown when recipe was scaled */}
             {recipe.multiplierNote && (
               <View style={styles.scaleBanner}>
                 <Text style={styles.scaleBannerIcon}>⚠</Text>
@@ -230,14 +304,7 @@ export function RecipePDF({ recipe }) {
               </View>
             )}
 
-            <View style={styles.ingredientsGrid}>
-              {recipe.ingredients.map((item, i) => (
-                <View key={i} style={styles.ingredientItem}>
-                  <View style={styles.bullet} />
-                  <Text style={styles.ingredientText}>{ingredientLabel(item)}</Text>
-                </View>
-              ))}
-            </View>
+            <IngredientsList ingredients={recipe.ingredients} />
           </>
         )}
 
@@ -256,12 +323,9 @@ export function RecipePDF({ recipe }) {
           </>
         )}
 
-        {/* Footer — fixed so it appears on every page */}
         <View style={styles.footer} fixed>
           <View style={styles.footerTop}>
-            <Text style={styles.footerPageNum}>
-              {recipe.title}
-            </Text>
+            <Text style={styles.footerPageNum}>{recipe.title}</Text>
             <Text
               style={styles.footerPageNum}
               render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`}

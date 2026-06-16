@@ -1,9 +1,24 @@
 "use client";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Button, Input, AutoComplete } from "antd";
-import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, TagOutlined, HolderOutlined } from "@ant-design/icons";
 
-// ── Unit definitions with aliases for autocomplete ────────────────────────────
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+// ── Unit definitions ──────────────────────────────────────────────────────────
 const UNITS = [
   { label: "teaspoon", value: "teaspoon", aliases: ["tsp", "t"] },
   { label: "tablespoon", value: "tablespoon", aliases: ["tbsp", "tbs", "tb", "T"] },
@@ -38,20 +53,114 @@ function getUnitOptions(input) {
   ).map((u) => ({ value: u.value, label: `${u.label} (${u.value})` }));
 }
 
-// ── Single ingredient row ─────────────────────────────────────────────────────
-function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, qtyRef, unitRef, nameRef, notesRef }) {
-  const [unitOptions, setUnitOptions] = useState(getUnitOptions(""));
+// ── Helpers ───────────────────────────────────────────────────────────────────
+export function emptyIngredient() {
+  return { qty: "", unit: "", name: "", notes: "" };
+}
 
+export function emptySection() {
+  return { type: "section", label: "" };
+}
+
+export function isSection(item) {
+  return item && item.type === "section";
+}
+
+function ensureId(item) {
+  if (item._id) return item;
+  return { ...item, _id: Math.random().toString(36).slice(2) };
+}
+
+export function stripIds(items) {
+  return items.map(({ _id, ...rest }) => rest);
+}
+
+// ── Drag handle ───────────────────────────────────────────────────────────────
+function DragHandle({ listeners, attributes }) {
+  return (
+    <div
+      {...listeners}
+      {...attributes}
+      style={{
+        cursor: "grab",
+        color: "#ccc",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 2px",
+        flexShrink: 0,
+        touchAction: "none",
+      }}
+      aria-label="Drag to reorder"
+    >
+      <HolderOutlined style={{ fontSize: 14 }} />
+    </div>
+  );
+}
+
+// ── Sortable section row ──────────────────────────────────────────────────────
+function SortableSectionRow({ item, onLabelChange, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item._id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={{ ...style, display: "flex", alignItems: "center", gap: 8, margin: "12px 0 6px" }}>
+      <DragHandle listeners={listeners} attributes={attributes} />
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          background: "#fdf6ec",
+          border: "1.5px dashed #d4aa7d",
+          borderRadius: 7,
+          paddingLeft: 10,
+          minWidth: 0,
+        }}
+      >
+        <TagOutlined style={{ color: "#d4863a", fontSize: 13, flexShrink: 0 }} />
+        <Input
+          value={item.label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          placeholder="Section name — e.g. Base, Filling, Topping…"
+          variant="borderless"
+          style={{ fontWeight: 600, fontSize: 13, color: "#8a5020", padding: "5px 4px", flex: 1 }}
+        />
+      </div>
+      <Button
+        type="text"
+        icon={<DeleteOutlined />}
+        onClick={onRemove}
+        style={{ color: "#ccc", flexShrink: 0 }}
+        aria-label="Remove section"
+      />
+    </div>
+  );
+}
+
+// ── Sortable ingredient row ───────────────────────────────────────────────────
+function SortableIngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, qtyRef, unitRef, nameRef, notesRef }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item._id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const [unitOptions, setUnitOptions] = useState(getUnitOptions(""));
   const update = (field, val) => onChange({ ...item, [field]: val });
 
-  const handleUnitSearch = (val) => {
-    setUnitOptions(getUnitOptions(val));
-    update("unit", val);
-  };
-  const handleUnitSelect = (val) => {
-    update("unit", val);
-    nameRef?.current?.focus();
-  };
+  const handleUnitSearch = (val) => { setUnitOptions(getUnitOptions(val)); update("unit", val); };
+  const handleUnitSelect = (val) => { update("unit", val); nameRef?.current?.focus(); };
+
   const handleKeyDown = (field) => (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -62,12 +171,11 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
     }
   };
 
-  const inputStyle = { borderRadius: 7 };
-
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+    <div ref={setNodeRef} style={{ ...style, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+      <DragHandle listeners={listeners} attributes={attributes} />
       <div style={{
-        minWidth: 24, height: 24, borderRadius: "50%",
+        minWidth: 22, height: 22, borderRadius: "50%",
         background: "#f5ede0", color: "#c07030",
         fontSize: 11, fontWeight: 700,
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -82,7 +190,7 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         onChange={(e) => update("qty", e.target.value)}
         onKeyDown={handleKeyDown("qty")}
         placeholder="Qty"
-        style={{ ...inputStyle, width: 64 }}
+        style={{ borderRadius: 7, width: 64 }}
       />
 
       <AutoComplete
@@ -98,7 +206,7 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
           ref={unitRef}
           placeholder="Unit"
           onKeyDown={handleKeyDown("unit")}
-          style={inputStyle}
+          style={{ borderRadius: 7 }}
         />
       </AutoComplete>
 
@@ -108,7 +216,7 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         onChange={(e) => update("name", e.target.value)}
         onKeyDown={handleKeyDown("name")}
         placeholder="Ingredient name"
-        style={{ ...inputStyle, flex: 1, minWidth: 140 }}
+        style={{ borderRadius: 7, flex: 1, minWidth: 140 }}
       />
 
       <Input
@@ -117,7 +225,7 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
         onChange={(e) => update("notes", e.target.value)}
         onKeyDown={handleKeyDown("notes")}
         placeholder="Notes (optional)"
-        style={{ ...inputStyle, width: 160 }}
+        style={{ borderRadius: 7, width: 160 }}
       />
 
       {showRemove && (
@@ -136,7 +244,9 @@ function IngredientRow({ item, index, onChange, onRemove, onEnter, showRemove, q
 function ColumnHeaders() {
   const labelStyle = { fontSize: 11, fontWeight: 600, color: "#9c9086", textTransform: "uppercase", letterSpacing: "0.05em" };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, paddingLeft: 30 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, paddingLeft: 4 }}>
+      <div style={{ width: 18, flexShrink: 0 }} />
+      <div style={{ width: 22, flexShrink: 0 }} />
       <div style={{ ...labelStyle, width: 64 }}>Qty</div>
       <div style={{ ...labelStyle, width: 130 }}>Unit</div>
       <div style={{ ...labelStyle, flex: 1, minWidth: 140 }}>Ingredient</div>
@@ -146,103 +256,132 @@ function ColumnHeaders() {
   );
 }
 
-// ── Empty ingredient ──────────────────────────────────────────────────────────
-export function emptyIngredient() {
-  return { qty: "", unit: "", name: "", notes: "" };
-}
-
 // ── Main IngredientList ───────────────────────────────────────────────────────
-export default function IngredientList({ items, onChange }) {
-  const refs = useRef([]);
+export default function IngredientList({ items: rawItems, onChange }) {
+  const [items, setItems] = useState(() => rawItems.map(ensureId));
 
-  const ensureRefs = (i) => {
-    if (!refs.current[i]) refs.current[i] = { qty: null, unit: null, name: null, notes: null };
-    return refs.current[i];
+  const refs = useRef({});
+  const ensureRefs = (id) => {
+    if (!refs.current[id]) refs.current[id] = { qty: null, unit: null, name: null, notes: null };
+    return refs.current[id];
   };
 
-  const updateItem = (i, updated) => {
-    const next = [...items];
-    next[i] = updated;
-    onChange(next);
+  const emit = (next) => {
+    setItems(next);
+    onChange(stripIds(next));
   };
 
-  const removeItem = (i) => {
-    refs.current.splice(i, 1);
-    onChange(items.filter((_, idx) => idx !== i));
+  const updateItem = (id, updated) => emit(items.map((it) => it._id === id ? updated : it));
+  const removeItem = (id) => emit(items.filter((it) => it._id !== id));
+
+  const addIngredient = () => {
+    const newItem = ensureId(emptyIngredient());
+    const next = [...items, newItem];
+    emit(next);
+    setTimeout(() => refs.current[newItem._id]?.qty?.focus(), 50);
   };
 
-  const addItem = () => {
-    onChange([...items, emptyIngredient()]);
-    setTimeout(() => refs.current[items.length]?.qty?.focus(), 50);
+  const addSection = () => emit([...items, ensureId(emptySection())]);
+
+  const handleEnter = (id) => {
+    const idx = items.findIndex((it) => it._id === id);
+    for (let j = idx + 1; j < items.length; j++) {
+      if (!isSection(items[j])) {
+        refs.current[items[j]._id]?.qty?.focus();
+        return;
+      }
+    }
+    addIngredient();
   };
 
-  const handleEnter = (i) => {
-    if (i < items.length - 1) refs.current[i + 1]?.qty?.focus();
-    else addItem();
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = ({ active, over }) => {
+    if (over && active.id !== over.id) {
+      const oldIndex = items.findIndex((it) => it._id === active.id);
+      const newIndex = items.findIndex((it) => it._id === over.id);
+      emit(arrayMove(items, oldIndex, newIndex));
+    }
   };
+
+  const ingredientCount = items.filter((it) => !isSection(it)).length;
+  let ingredientCounter = 0;
 
   return (
     <div>
-      {/* Horizontally scrollable wrapper */}
       <div style={{ position: "relative" }}>
-        <div
-          style={{
-            overflowX: "auto",
-            WebkitOverflowScrolling: "touch",
-            // Thin scrollbar on mobile browsers that show one
-            scrollbarWidth: "thin",
-            scrollbarColor: "#e0d8ce transparent",
-            paddingBottom: 4,
-          }}
-        >
-          {/* Inner container with a fixed minimum width so rows never squash */}
-          <div style={{ minWidth: 580 }}>
+        <div style={{
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "thin",
+          scrollbarColor: "#e0d8ce transparent",
+          paddingBottom: 4,
+        }}>
+          <div style={{ minWidth: 600 }}>
             <ColumnHeaders />
-            {items.map((item, i) => {
-              ensureRefs(i);
-              return (
-                <IngredientRow
-                  key={i}
-                  item={item}
-                  index={i}
-                  onChange={(updated) => updateItem(i, updated)}
-                  onRemove={() => removeItem(i)}
-                  onEnter={() => handleEnter(i)}
-                  showRemove={items.length > 1}
-                  qtyRef={(el) => { ensureRefs(i).qty = el?.input || el; }}
-                  unitRef={(el) => { ensureRefs(i).unit = el?.input || el; }}
-                  nameRef={(el) => { ensureRefs(i).name = el?.input || el; }}
-                  notesRef={(el) => { ensureRefs(i).notes = el?.input || el; }}
-                />
-              );
-            })}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={items.map((it) => it._id)} strategy={verticalListSortingStrategy}>
+                {items.map((item) => {
+                  if (isSection(item)) {
+                    return (
+                      <SortableSectionRow
+                        key={item._id}
+                        item={item}
+                        onLabelChange={(label) => updateItem(item._id, { ...item, label })}
+                        onRemove={() => removeItem(item._id)}
+                      />
+                    );
+                  }
+                  const displayIndex = ingredientCounter++;
+                  ensureRefs(item._id);
+                  return (
+                    <SortableIngredientRow
+                      key={item._id}
+                      item={item}
+                      index={displayIndex}
+                      onChange={(updated) => updateItem(item._id, updated)}
+                      onRemove={() => removeItem(item._id)}
+                      onEnter={() => handleEnter(item._id)}
+                      showRemove={ingredientCount > 1}
+                      qtyRef={(el) => { ensureRefs(item._id).qty = el?.input || el; }}
+                      unitRef={(el) => { ensureRefs(item._id).unit = el?.input || el; }}
+                      nameRef={(el) => { ensureRefs(item._id).name = el?.input || el; }}
+                      notesRef={(el) => { ensureRefs(item._id).notes = el?.input || el; }}
+                    />
+                  );
+                })}
+              </SortableContext>
+            </DndContext>
           </div>
         </div>
 
-        {/* Fade hint on the right edge — only visible when there's overflow to scroll */}
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            bottom: 4,
-            width: 40,
-            background: "linear-gradient(to right, transparent, #faf8f4)",
-            pointerEvents: "none",
-            borderRadius: "0 8px 8px 0",
-          }}
-        />
+        <div aria-hidden="true" style={{
+          position: "absolute", top: 0, right: 0, bottom: 4, width: 40,
+          background: "linear-gradient(to right, transparent, #faf8f4)",
+          pointerEvents: "none", borderRadius: "0 8px 8px 0",
+        }} />
       </div>
 
-      <Button
-        type="dashed"
-        icon={<PlusOutlined />}
-        onClick={addItem}
-        style={{ marginTop: 4, borderRadius: 8, borderColor: "#d4863a", color: "#d4863a", width: "fit-content" }}
-      >
-        Add ingredient
-      </Button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+        <Button
+          type="dashed"
+          icon={<PlusOutlined />}
+          onClick={addIngredient}
+          style={{ borderRadius: 8, borderColor: "#d4863a", color: "#d4863a" }}
+        >
+          Add ingredient
+        </Button>
+        <Button
+          type="dashed"
+          icon={<TagOutlined />}
+          onClick={addSection}
+          style={{ borderRadius: 8, borderColor: "#b8a090", color: "#9c7060" }}
+        >
+          Add section
+        </Button>
+      </div>
     </div>
   );
 }

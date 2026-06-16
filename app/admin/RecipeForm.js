@@ -9,6 +9,7 @@ import {
   StarFilled, StarOutlined, QuestionCircleOutlined,
 } from "@ant-design/icons";
 import IngredientList, { emptyIngredient } from "../components/IngredientList";
+import StepList, { isStepSection, emptyStepSection } from "../components/StepList";
 import ImportJson from "../components/ImportJson";
 
 const { TextArea } = Input;
@@ -189,6 +190,9 @@ function DynamicList({ items, onChange, placeholder, multiline = false }) {
 function normaliseIngredients(raw) {
   if (!raw?.length) return [emptyIngredient()];
   return raw.map((item) => {
+    // Pass section headers through untouched
+    if (item?.type === "section") return item;
+
     if (typeof item === "string") {
       return { qty: "", unit: "", name: item, notes: "" };
     }
@@ -199,6 +203,11 @@ function normaliseIngredients(raw) {
       notes: item.notes ?? "",
     };
   });
+}
+
+function normaliseSteps(raw) {
+  if (!raw?.length) return [""];
+  return raw; // sections and strings pass through as-is
 }
 
 // ─── Main Form ────────────────────────────────────────────────────────────────
@@ -226,6 +235,8 @@ export default function RecipeForm({ initialData = {}, onSubmit, submitting, isE
     () => (initialData.images ?? []).map((url) => ({ url, preview: url }))
   );
   const [coverIndex, setCoverIndex] = useState(initialData.coverIndex ?? 0);
+  const [importKey, setImportKey] = useState(0);
+
 
   // ── JSON import handler ──────────────────────────────────────────────────
   const handleImport = (data) => {
@@ -240,7 +251,9 @@ export default function RecipeForm({ initialData = {}, onSubmit, submitting, isE
     if (data.defaultMultiplier !== undefined) setDefaultMultiplier(data.defaultMultiplier ?? 1);
     if (data.ingredients !== undefined) setIngredients(normaliseIngredients(data.ingredients));
     if (data.steps !== undefined) setSteps(data.steps?.length ? data.steps : [""]);
+    if (data.steps !== undefined) setSteps(data.steps?.length ? data.steps : [""]);
     if (data.notes !== undefined) setNotes(data.notes ?? "");
+    setImportKey(k => k + 1);
   };
 
   const handleImageAdd = (img) => setImages((prev) => [...prev, img]);
@@ -254,8 +267,10 @@ export default function RecipeForm({ initialData = {}, onSubmit, submitting, isE
       title, subtitle, description, tags,
       prepTime, cookTime, servings, difficulty,
       defaultMultiplier,
-      ingredients: ingredients.filter((ing) => ing.name.trim()),
-      steps: steps.filter(Boolean),
+      ingredients: ingredients.filter((ing) =>
+        ing.type === "section" ? ing.label.trim() !== "" : ing.name.trim() !== ""
+      ),      
+      steps: steps.filter((s) => (typeof s === "object" ? s.label?.trim() : s?.trim())),
       notes, images, coverIndex, published: true,
     });
   };
@@ -408,11 +423,11 @@ export default function RecipeForm({ initialData = {}, onSubmit, submitting, isE
       </Section>
 
       <Section title="Ingredients">
-        <IngredientList items={ingredients} onChange={setIngredients} />
+        <IngredientList key={`ing-${importKey}`} items={ingredients} onChange={setIngredients} />
       </Section>
 
       <Section title="Method">
-        <DynamicList items={steps} onChange={setSteps} placeholder="Step" multiline />
+        <StepList key={`step-${importKey}`} items={steps} onChange={setSteps} />
       </Section>
 
       <Section title="Notes & Tips">

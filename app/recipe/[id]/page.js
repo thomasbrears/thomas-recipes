@@ -18,23 +18,20 @@ import {
 
 const { Title, Paragraph } = Typography;
 
-// ─── Unit conversion helpers ──────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Metric → Imperial conversion map.
- * Each entry: [metricUnit, imperialUnit, multiplier, decimalPlaces]
- */
+function isSection(item) {
+  return item && item.type === "section";
+}
+
+// ─── Unit conversion helpers ──────────────────────────────────────────────────
 const METRIC_TO_IMPERIAL = [
-  // Weight
   { from: /\b(\d+(?:\.\d+)?)\s*kg\b/gi,  to: (n) => `${round(n * 2.20462, 2)} lb` },
   { from: /\b(\d+(?:\.\d+)?)\s*g\b/gi,   to: (n) => `${round(n * 0.035274, 2)} oz` },
-  // Volume
   { from: /\b(\d+(?:\.\d+)?)\s*ml\b/gi,  to: (n) => `${round(n * 0.202884, 2)} tsp` },
   { from: /\b(\d+(?:\.\d+)?)\s*litre?s?\b/gi, to: (n) => `${round(n * 4.22675, 2)} cups` },
   { from: /\b(\d+(?:\.\d+)?)\s*L\b/g,    to: (n) => `${round(n * 4.22675, 2)} cups` },
-  // Temperature
   { from: /\b(\d+(?:\.\d+)?)\s*°?C\b/g,  to: (n) => `${round(n * 9/5 + 32, 0)}°F` },
-  // Length / depth
   { from: /\b(\d+(?:\.\d+)?)\s*cm\b/gi,  to: (n) => `${round(n * 0.393701, 1)}"` },
   { from: /\b(\d+(?:\.\d+)?)\s*mm\b/gi,  to: (n) => `${round(n * 0.0393701, 2)}"` },
 ];
@@ -53,16 +50,11 @@ function round(num, dp) {
   return parseFloat(num.toFixed(dp));
 }
 
-/**
- * Convert all recognisable unit patterns in a string.
- * mode: "metric" | "imperial"
- */
 function convertUnits(str, mode) {
   if (!str) return str;
   const conversions = mode === "imperial" ? METRIC_TO_IMPERIAL : IMPERIAL_TO_METRIC;
   let result = str;
   for (const { from, to } of conversions) {
-    // Reset lastIndex for global regexes
     from.lastIndex = 0;
     result = result.replace(from, (_, num) => to(parseFloat(num)));
   }
@@ -70,18 +62,91 @@ function convertUnits(str, mode) {
 }
 
 // ─── Servings formatter ───────────────────────────────────────────────────────
-
-/**
- * Scale a servings string like "4", "4-6", "Serves 4", "Makes 12 cookies".
- * Numbers are multiplied by relativeMult; non-numeric words are preserved.
- */
 function scaleServings(servingsStr, relativeMult) {
   if (!servingsStr || relativeMult === 1) return servingsStr;
   return servingsStr.replace(/\d+(?:\.\d+)?/g, (match) => {
     const scaled = parseFloat(match) * relativeMult;
-    // Keep integers as integers; trim floating point noise
     return Number.isInteger(scaled) ? scaled : parseFloat(scaled.toPrecision(3));
   });
+}
+
+// ─── Ingredients checklist with section headers ───────────────────────────────
+function IngredientsChecklist({ ingredients, checkedIngredients, onChange, relativeMult, unitMode }) {
+  // We can't use a single Checkbox.Group across section headers because the
+  // group renders everything flat. Instead we manage checked state ourselves
+  // (passed in as a Set of array indices) and render Checkbox components individually.
+
+  // Build a list of only ingredient indices so we can pass the full array index
+  // as the checkbox value — this keeps compatibility with the existing state shape.
+  const ingredientIndices = ingredients
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => !isSection(item))
+    .map(({ i }) => i);
+
+  const toggleOne = (idx) => {
+    const next = checkedIngredients.includes(idx)
+      ? checkedIngredients.filter((v) => v !== idx)
+      : [...checkedIngredients, idx];
+    onChange(next);
+  };
+
+  // Group into runs for rendering
+  const runs = [];
+  let currentRun = null;
+  for (const [i, item] of ingredients.entries()) {
+    if (isSection(item)) {
+      if (currentRun) runs.push(currentRun);
+      currentRun = { label: item.label, entries: [] };
+    } else {
+      if (!currentRun) currentRun = { label: null, entries: [] };
+      currentRun.entries.push({ item, i });
+    }
+  }
+  if (currentRun) runs.push(currentRun);
+
+  return (
+    <div style={{ width: "100%" }}>
+      {runs.map((run, ri) => (
+        <div key={ri}>
+          {run.label && (
+            <div
+              style={{
+                margin: ri === 0 ? "0 0 8px" : "16px 0 8px",
+                padding: "4px 10px",
+                background: "#fdf6ec",
+                border: "1px solid #e8c88a",
+                borderRadius: 6,
+                display: "inline-block",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#8a5020",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              {run.label}
+            </div>
+          )}
+          <div className={`ingredients-grid${ingredientIndices.length > 7 ? " ingredients-grid--many" : ""}`}>
+            {run.entries.map(({ item, i }) => {
+              const scaled = scaleIngredient(item, relativeMult);
+              const label = unitMode === "imperial" ? convertUnits(scaled, "imperial") : scaled;
+              const checked = checkedIngredients.includes(i);
+              return (
+                <Checkbox
+                  key={i}
+                  checked={checked}
+                  onChange={() => toggleOne(i)}
+                >
+                  {label}
+                </Checkbox>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +160,7 @@ export default function RecipePage() {
   const [checkedIngredients, setCheckedIngredients] = useState([]);
   const [checkedSteps, setCheckedSteps] = useState([]);
   const [multiplier, setMultiplier] = useState(1);
-  const [unitMode, setUnitMode] = useState("metric"); // "metric" | "imperial"
+  const [unitMode, setUnitMode] = useState("metric");
 
   useEffect(() => {
     getRecipe(id)
@@ -107,7 +172,6 @@ export default function RecipePage() {
   const handleMultiplierChange = (mult) => {
     setMultiplier(mult);
     setCheckedIngredients([]);
-    // Don't reset step checks — user may already be mid-cook
   };
 
   const handleDownloadPDF = async (e) => {
@@ -130,6 +194,7 @@ export default function RecipePage() {
         ...recipe,
         ingredients: multiplier !== defaultMultiplier
           ? recipe.ingredients?.map((ing) => {
+              if (isSection(ing)) return ing; // pass section headers through unchanged
               const relativeMult = multiplier / defaultMultiplier;
               return typeof ing === "string"
                 ? scaleIngredient(ing, relativeMult)
@@ -177,7 +242,8 @@ export default function RecipePage() {
     .filter(Boolean)
     .filter((img, i, arr) => arr.indexOf(img) === i);
 
-  const ingredientCount = recipe.ingredients?.length || 0;
+  // Only count actual ingredient rows (not section headers)
+  const ingredientCount = recipe.ingredients?.filter((i) => !isSection(i)).length ?? 0;
 
   const scaledServings = scaleServings(recipe.servings, relativeMult);
 
@@ -195,6 +261,7 @@ export default function RecipePage() {
           grid-template-columns: 1fr;
           gap: 10px;
           width: 100%;
+          margin-bottom: 4px;
         }
         @media (min-width: 600px) {
           .ingredients-grid {
@@ -207,24 +274,28 @@ export default function RecipePage() {
           }
         }
         .ingredients-grid .ant-checkbox-wrapper {
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          display: flex;
+          align-items: flex-start;
+          white-space: normal;
+          overflow: visible;
+          text-overflow: unset;
+          line-height: 1.5;
         }
 
-        /* Step completion styles */
+        .ingredients-grid .ant-checkbox-label {
+          white-space: normal;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+        }
+
         .step-item {
           cursor: pointer;
           border-radius: 8px;
           padding: 4px 8px;
           transition: background 0.2s, opacity 0.2s;
         }
-        .step-item:hover {
-          background: #fdf6ee;
-        }
-        .step-item--done {
-          opacity: 0.45;
-        }
+        .step-item:hover { background: #fdf6ee; }
+        .step-item--done { opacity: 0.45; }
         .step-item--done .step-body {
           text-decoration: line-through;
           color: #999 !important;
@@ -244,17 +315,9 @@ export default function RecipePage() {
           flex-shrink: 0;
           transition: background 0.2s, color 0.2s;
         }
-        .step-item--done .step-number {
-          background: #e0e0e0;
-          color: #aaa;
-        }
-        .step-header {
-          display: flex;
-          align-items: center;
-          margin-bottom: 4px;
-        }
+        .step-item--done .step-number { background: #e0e0e0; color: #aaa; }
+        .step-header { display: flex; align-items: center; margin-bottom: 4px; }
 
-        /* Unit toggle */
         .unit-toggle {
           display: inline-flex;
           align-items: center;
@@ -291,9 +354,7 @@ export default function RecipePage() {
               display: "flex", alignItems: "flex-end", padding: 24,
             }}>
               <div>
-                <Title style={{ color: "white", margin: 0 }} level={2}>
-                  {recipe.title}
-                </Title>
+                <Title style={{ color: "white", margin: 0 }} level={2}>{recipe.title}</Title>
                 {recipe.subtitle && (
                   <Paragraph type="secondary" style={{ color: "white", margin: "8px 0 0" }}>
                     {recipe.subtitle}
@@ -315,7 +376,6 @@ export default function RecipePage() {
           </div>
         )}
 
-        {/* ── Stat cards — servings updates with multiplier ── */}
         <Row gutter={[8, 8]} style={{ marginTop: 16 }}>
           {recipe.prepTime && (
             <Col xs={12} md={6}>
@@ -341,7 +401,6 @@ export default function RecipePage() {
                 size="small"
                 style={{
                   textAlign: "center",
-                  // Highlight the card when servings have changed
                   border: relativeMult !== 1 ? "1px solid #f0c87a" : undefined,
                   background: relativeMult !== 1 ? "#fffbf0" : undefined,
                   transition: "background 0.3s, border 0.3s",
@@ -384,14 +443,11 @@ export default function RecipePage() {
 
           {recipe.ingredients?.length > 0 && (
             <>
-              {/* ── Controls row: multiplier + unit toggle ── */}
               <div style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
                 <RecipeMultiplier
                   defaultMultiplier={defaultMultiplier}
                   onChange={handleMultiplierChange}
                 />
-
-                {/* Unit toggle */}
                 <label className="unit-toggle" style={{ cursor: "pointer" }}>
                   <span style={{ fontWeight: unitMode === "metric" ? 700 : 400 }}>Metric</span>
                   <Switch
@@ -413,31 +469,18 @@ export default function RecipePage() {
                 )}
               </Title>
 
-              <Checkbox.Group
-                value={checkedIngredients}
+              <IngredientsChecklist
+                ingredients={recipe.ingredients}
+                checkedIngredients={checkedIngredients}
                 onChange={setCheckedIngredients}
-                style={{ width: "100%" }}
-                aria-label="Ingredients checklist"
-              >
-                <div className={`ingredients-grid${ingredientCount > 7 ? " ingredients-grid--many" : ""}`}>
-                  {recipe.ingredients.map((item, i) => {
-                    // 1. Scale by multiplier, 2. convert units if imperial
-                    const scaled = scaleIngredient(item, relativeMult);
-                    const label = unitMode === "imperial" ? convertUnits(scaled, "imperial") : scaled;
-                    return (
-                      <Checkbox key={i} value={i}>
-                        {label}
-                      </Checkbox>
-                    );
-                  })}
-                </div>
-              </Checkbox.Group>
+                relativeMult={relativeMult}
+                unitMode={unitMode}
+              />
             </>
           )}
 
           <Divider />
 
-          {/* ── Steps with completion tracking ── */}
           {recipe.steps?.length > 0 && (
             <>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -468,12 +511,10 @@ export default function RecipePage() {
                         role="checkbox"
                         aria-checked={done}
                         tabIndex={0}
-                        onKeyDown={(e) => e.key === " " || e.key === "Enter" ? toggleStep(i) : null}
+                        onKeyDown={(e) => (e.key === " " || e.key === "Enter") ? toggleStep(i) : null}
                       >
                         <div className="step-header">
-                          <span className="step-number">
-                            {done ? "✓" : i + 1}
-                          </span>
+                          <span className="step-number">{done ? "✓" : i + 1}</span>
                         </div>
                         <div
                           className="step-body"
@@ -494,7 +535,6 @@ export default function RecipePage() {
                 })}
               </div>
 
-              {/* Progress indicator */}
               {recipe.steps.length > 1 && (
                 <div style={{ marginTop: 12, fontSize: 13, color: "#999" }}>
                   {checkedSteps.length === recipe.steps.length
@@ -523,7 +563,6 @@ export default function RecipePage() {
           )}
         </div>
 
-        {/* ── Fixed bottom bar ── */}
         <div style={{
           position: "fixed", bottom: 0, left: 0, right: 0,
           background: "white", borderTop: "1px solid #eee",
